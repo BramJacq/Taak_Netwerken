@@ -1,4 +1,4 @@
-// udp_client_getaddrinfo.c
+// udp_client_getaddrinfo_v2.c
 
 #ifdef _WIN32
     #define _WIN32_WINNT _WIN32_WINNT_WIN7 //select minimal legacy support, needed for inet_pton, inet_ntop
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
 
     // Step 1.0 - Initialise Winsock
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 0), &wsaData) != 0) {
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         fprintf(stderr, "WSAStartup failed.\n");
         exit(1);
     }
@@ -44,18 +44,19 @@ int main(int argc, char *argv[]) {
     scanf("%s", server_ip);
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_family = AF_UNSPEC;  // IP versie niet belangrijk
+    hints.ai_socktype = SOCK_DGRAM;  // UDP socket
 
+    // Verkrijg server adresinformatie via getaddrinfo
     if (getaddrinfo(server_ip, server_port, &hints, &server_info) != 0) {
         fprintf(stderr, "getaddrinfo failed.\n");
         WSACleanup();
         exit(1);
     }
 
-    // Step 1.2 - Create UDP socket
-    int sockfd = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
-    if (sockfd == -1) {
+    // Step 1.2 - Maak de UDP socket aan
+    SOCKET sock = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
+    if (sock == INVALID_SOCKET) {
         fprintf(stderr, "Could not create socket.\n");
         freeaddrinfo(server_info);
         WSACleanup();
@@ -63,10 +64,9 @@ int main(int argc, char *argv[]) {
     }
     printf("Socket created.\n");
 
-    // Set receive timeout (Step 1.3)
-    DWORD timeout = 16000; // 16 seconds
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
-
+    // Stel de receive timeout in op 16 seconden
+    DWORD timeout = 16000; // 16 seconden
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
 
     /////////////
     // Execution
@@ -74,23 +74,23 @@ int main(int argc, char *argv[]) {
 
     char message[2000];
     char buffer[2000];
-    int bytes_received;
-    socklen_t addr_len = (socklen_t)server_info->ai_addrlen;
+    int recv_size;
+    socklen_t server_len = (socklen_t)server_info->ai_addrlen;
 
     while (1) {
         printf("Enter your guess: ");
         scanf("%s", message);
 
-        // Step 2.1 - Send guess
-        sendto(sockfd, message, (int)strlen(message), 0, server_info->ai_addr, server_info->ai_addrlen);
+        // Step 2.1 - Verstuur het bericht naar de server
+        sendto(sock, message, (int)strlen(message), 0, server_info->ai_addr, server_info->ai_addrlen);
 
-        // Step 2.2 - Receive reply
-        bytes_received = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0, server_info->ai_addr, &addr_len);
+        // Step 2.2 - Wacht op antwoord van de server
+        recv_size = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, server_info->ai_addr, &server_len);
 
-        if (bytes_received == SOCKET_ERROR) {
+        if (recv_size == SOCKET_ERROR) {
             printf("You lost ?\n");
         } else {
-            buffer[bytes_received] = '\0';
+            buffer[recv_size] = '\0'; // Zorg ervoor dat we een string krijgen
             printf("Server reply: %s\n", buffer);
         }
     }
@@ -99,14 +99,15 @@ int main(int argc, char *argv[]) {
     // Clean up
     ////////////
 
-    // Step 3.2 - Free address info
+    // Step 3.1 - Vrijgeven van de serveradresinformatie
     freeaddrinfo(server_info);
 
-    // Step 3.1 - Close socket
-    close(sockfd);
+    // Step 3.2 - Sluit de socket
+    close(sock);
 
-    // Step 3.0 - Cleanup Winsock
+    // Step 3.3 - Opruimen van Winsock
     WSACleanup();
 
     return 0;
 }
+
